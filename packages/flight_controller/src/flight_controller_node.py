@@ -13,7 +13,6 @@ from h2rMultiWii import MultiWii
 from serial import SerialException
 from std_msgs.msg import Header, Empty
 from geometry_msgs.msg import Quaternion
-from nav_msgs.msg import Odometry
 from flight_controller.msg import Mode, RC
 import os
 
@@ -33,8 +32,6 @@ class FlightController(object):
     /pidrone/desired/mode
     /pidrone/heartbeat/infrared
     /pidrone/heartbeat/web_interface
-    /pidrone/heartbeat/pid_controller
-    /pidrone/state
     /pidrone/infrared 
 
 
@@ -94,11 +91,12 @@ class FlightController(object):
     def fly_commands_callback(self, msg):
         """ Store and send the flight commands if the current mode is FLYING """
         if self.curr_mode == 'FLYING':
-            r = msg.roll
-            p = msg.pitch
-            y = msg.yaw
-            t = msg.throttle
+            r = int(msg.roll)
+            p = int(msg.pitch)
+            y = int(msg.yaw)
+            t = int(msg.throttle)
             self.command = [r,p,y,t]
+            print self.command, "FLY COMMAND CALLBACK"
 
 
     # Update methods:
@@ -204,9 +202,11 @@ class FlightController(object):
             self.command = cmds.disarm_cmd
         elif self.curr_mode == 'ARMED':
             if self.prev_mode == 'DISARMED':
+            	print "arm command being sent"
                 self.command = cmds.arm_cmd
             elif self.prev_mode == 'ARMED':
-                self.command = cmds.idle_cmd
+                print "Idle is being sent"
+                self.command = cmds.arm_cmd
 
     # Helper Methods:
     #################
@@ -227,6 +227,7 @@ class FlightController(object):
 
     def send_cmd(self):
         """ Send commands to the flight controller board """
+        print "input command sent", self.command
         self.board.sendCMD(8, MultiWii.SET_RAW_RC, self.command)
         self.board.receiveDataPacket()
         if (self.command != self.last_command):
@@ -253,17 +254,12 @@ class FlightController(object):
         """Update web_interface heartbeat"""
         self.heartbeat_web_interface = rospy.Time.now()
 
-    def heartbeat_pid_controller_callback(self, msg):
-        """Update pid_controller heartbeat"""
-        self.heartbeat_pid_controller = rospy.Time.now()
+
 
     def heartbeat_infrared_callback(self, msg):
         """Update ir sensor heartbeat"""
         self.heartbeat_infrared = rospy.Time.now()
 
-    def heartbeat_state_estimator_callback(self, msg):
-        """Update state_estimator heartbeat"""
-        self.heartbeat_state_estimator = rospy.Time.now()
 
     def shouldIDisarm(self):
         """
@@ -272,25 +268,17 @@ class FlightController(object):
         """
         curr_time = rospy.Time.now()
         disarm = False
-        if self.battery_message.voltage != None and self.battery_message.voltage < self.minimum_voltage:
+        if self.battery_message.voltage != None and abs(self.battery_message.voltage) < self.minimum_voltage:
             print('\nSafety Failure: low battery\n')
+            print("Battery at: ", self.battery_message.voltage, "\n")
             disarm = True
         if curr_time - self.heartbeat_web_interface > rospy.Duration.from_sec(3):
             print('\nSafety Failure: web interface heartbeat\n')
             print('The web interface stopped responding. Check your browser')
             disarm = True
-        if curr_time - self.heartbeat_pid_controller > rospy.Duration.from_sec(1):
-            print('\nSafety Failure: not receiving flight commands.')
-            print('Check the pid_controller node\n')
-            disarm = True
         if curr_time - self.heartbeat_infrared > rospy.Duration.from_sec(1):
             print('\nSafety Failure: not receiving data from the IR sensor.')
             print('Check the infrared node\n')
-            disarm = True
-        if curr_time - self.heartbeat_state_estimator > rospy.Duration.from_sec(1):
-            print('\nSafety Failure: not receiving a state estimate.')
-            print('Check the state_estimator node\n')
-            disarm = True
 
         return disarm
 
@@ -330,8 +318,6 @@ def main():
     # heartbeat subscribers
     rospy.Subscriber("heartbeat/infrared", Empty, fc.heartbeat_infrared_callback)
     rospy.Subscriber("heartbeat/web_interface", Empty, fc.heartbeat_web_interface_callback)
-    rospy.Subscriber("heartbeat/pid_controller", Empty, fc.heartbeat_pid_controller_callback)
-    rospy.Subscriber("state", Odometry, fc.heartbeat_state_estimator_callback)
 
 
 
